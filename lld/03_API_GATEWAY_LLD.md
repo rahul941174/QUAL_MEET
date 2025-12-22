@@ -22,7 +22,9 @@ The **API Gateway** acts as the single entry point for all HTTP traffic. It insu
 | `/api/rooms/:id` | GET | `room-service` | **YES** |
 | `/api/ice-servers` | GET | `turn-credential-service` | **YES** |
 
-*   **WebSocket:** `/socket.io/*` -> Bypasses Gateway logic usually (handled by Nginx LB directly to Signaling), OR proxied via Gateway with `ws: true`. For Phase 1, assuming Nginx handles WSS routing, but if Gateway proxies it, it must support connection upgrades.
+### Split Routing (WebSocket Bypass)
+*   **WebSocket Traffic (`/socket.io/*`)** is routed **directly to the Signaling Service** via the Nginx Load Balancer.
+*   **Implication:** API Gateway Authentication and Rate Limiting logic **DOES NOT APPLY** to WebSockets. The Signaling Service implements its own local safeguards (see `01_SIGNALING_SERVICE_LLD.md`).
 
 ---
 
@@ -31,7 +33,8 @@ The **API Gateway** acts as the single entry point for all HTTP traffic. It insu
 1.  **Extraction:**
     *   Look for `Authorization: Bearer <token>` header.
 2.  **Verification:**
-    *   `jwt.verify(token, JWT_SECRET)`.
+    *   `jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] })`.
+    *   Uses the **Public Key** shared by the Auth Service.
 3.  **Injection:**
     *   If valid, attach decoded user info to request headers before proxying.
     *   `X-User-Id: <userId>`
@@ -57,6 +60,8 @@ The **API Gateway** acts as the single entry point for all HTTP traffic. It insu
 *   **Global Limit:** 100 requests per 15 minutes per IP.
 *   **Auth Limit:** 5 login attempts per minute per IP.
 *   **Storage:** Redis is preferred for distributed counting.
+*   **Keyspace Isolation:**
+    *   **MUST** use a key prefix (e.g., `rl:`) or a separate Redis Logical Database to prevent collision with Signaling Service Pub/Sub traffic.
 
 ---
 

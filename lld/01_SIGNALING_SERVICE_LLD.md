@@ -8,6 +8,7 @@
 *   **Room Presence:** Managing the list of active participants in a room using Redis.
 *   **Multi-Node Scaling:** Using Redis Pub/Sub to sync events across multiple signaling instances.
 *   **State Recovery:** Handling reconnections and enforcing presence TTL.
+*   **Local Rate Limiting:** Enforcing rate limits for WebSocket connections (since they bypass the API Gateway).
 
 ### Explicit Non-Responsibilities
 *   **Media Processing:** NO audio/video parsing, transcoding, or mixing.
@@ -20,14 +21,19 @@
 ## 2. WebSocket Connection Lifecycle
 
 1.  **Handshake Request:**
-    *   Client connects to `wss://api.qualmeet.com/socket.io/?token=JWT_TOKEN`.
-    *   Query parameter `token` is mandatory.
+    *   Client connects to `wss://api.qualmeet.com/socket.io/`.
+    *   **Auth Payload:** Client MUST send token via the auth object: `io(url, { auth: { token: "..." } })`.
+    *   **Query Strings are BANNED** for auth (Security risk in server logs).
 2.  **JWT Verification:**
-    *   Server extracts `token`.
-    *   Verifies signature using shared secret/public key.
+    *   Server extracts token from `socket.handshake.auth.token`.
+    *   Verifies signature using **RS256 Public Key** (Shared Secret HS256 is deprecated).
     *   Checks `exp` (expiration).
     *   **Failure:** If invalid/expired, immediately close connection with code `4001` (Unauthorized).
-3.  **Connection Established:**
+3.  **Local Rate Limiting:**
+    *   Check connection rate using **Redis keys with prefix `rl:`** (e.g., `rl:ip:127.0.0.1`).
+    *   Limit: 10 connections/minute per IP.
+    *   **Failure:** Reject connection with code `4029` (Too Many Requests).
+4.  **Connection Established:**
     *   On success, decode JWT to get `userId`.
     *   Map `socket.id` to `userId`.
     *   Send `connected` acknowledgment to client.
@@ -85,12 +91,15 @@ const iceCandidateBuffer = new Map<string, RTCIceCandidate[]>();
 1.  **Client Event:** `socket.emit('join_room', { roomId })`
 2.  **Validation:**
     *   Check if `roomId` is valid format.
-    *   (Optional) HTTP call to Room Service to verify room exists (cached).
-3.  **Limit Check:**
-    *   `SCARD room:{roomId}:users` -> count.
-    *   If count >= **4** (Phase 1 Limit), emit `error` ({ message: 'Room full' }).
-4.  **State Update:**
-    *   Redis: `SADD room:{roomId}:users {userId}`.
+    *   Fetch `maxParticipants` from Redis Room Object (set by Room Service).
+3.  **Atomic Admission (Critical):**
+    *   **MUST** use a **Redis Lua script** to ensure atomicity.
+    *   *Logic:* Check `SCARD` vs `maxParticipants`. If `< limit`, execute `SADD`.
+    *   **Redis Outage Handling:** Wrap the Lua call in a **try/catch**.
+        *   **Policy: FAIL CLOSED.** If Redis is down, we cannot guarantee room limits or presence. Reject the join request.
+        *   Return error: "Service Temporarily Unavailable".
+    *   If script returns "Full" -> emit `error` ({ message: 'Room full' }).
+4.  **State Update (On Success):**
     *   Redis: `SET presence:{roomId}:{userId} {timestamp} EX 30`.
     *   Local: Update `socketToRoom`, `socketToUser`, `userToSocket`.
 5.  **Join Event:**
@@ -116,10 +125,9 @@ const iceCandidateBuffer = new Map<string, RTCIceCandidate[]>();
 3.  Execute **Explicit Leave** logic.
 
 ### Presence TTL Expiry (Safety Net)
-1.  Redis Key `presence:{roomId}:{userId}` expires.
-2.  (Requires Redis Keyspace Notifications or separate worker)
-3.  Worker detects expiry -> Publishes `user_left`.
-    *   *Note for Phase 1:* We rely mostly on socket disconnect. TTL is for hard crashes.
+1.  **Do NOT rely on Redis Keyspace Notifications.**
+2.  TTL is merely a fallback to clean up "zombie" keys in Redis.
+3.  **Client-Side Cleanup:** Clients are responsible for detecting unresponsive peers (via ICE Connection State) and treating them as left.
 
 ---
 
@@ -186,7 +194,7 @@ ICE candidates often generated immediately, reaching the other peer *before* the
 *   **Invalid Room:** Emit `error` -> Client redirects to home.
 *   **Room Full:** Emit `error` -> Client shows "Room Capacity Reached".
 *   **Duplicate Joins:** If same `userId` joins from two sockets, the first one is usually disconnected or the second one kicks the first (Last-Write-Wins logic for presence).
-*   **Redis Failure:** Log critical error. Service enters "Degraded Mode" (local-only, no multi-node).
+*   **Redis Failure:** Log critical error. **FAIL CLOSED**: Deny new joins to protect room state integrity.
 
 ---
 
@@ -214,9 +222,11 @@ ICE candidates often generated immediately, reaching the other peer *before* the
 ## 14. Implementation Checklist
 
 - [ ] WebSocket Server initialized (Socket.IO/WS).
-- [ ] JWT Middleware implemented & verifying tokens.
+- [ ] **RS256** JWT verification (using Public Key).
+- [ ] **Redis Lua Script** for atomic room join (wrapped in **try/catch**).
+- [ ] **Local Rate Limiter** using `rl:` key prefix.
 - [ ] Redis Client connected (Pub and Sub clients).
-- [ ] `join_room` handler (Limit check + Redis SADD + Event emit).
+- [ ] `join_room` handler (Limit check via Lua + Redis SADD + Event emit).
 - [ ] `leave_room` handler (Redis SREM + Event emit).
 - [ ] `offer` / `answer` relays working.
 - [ ] `ice_candidate` relays working.

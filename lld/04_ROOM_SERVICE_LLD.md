@@ -23,6 +23,7 @@ The **Room Service** manages the lifecycle and configuration of meetings. It is 
 | `host_id` | UUID | FK -> Users | Creator of the meeting |
 | `created_at` | TIMESTAMP | DEFAULT `NOW()` | Creation time |
 | `is_active` | BOOLEAN | DEFAULT `TRUE` | Soft delete flag |
+| `max_participants` | INTEGER | DEFAULT 4 | Hard constraint for this meeting |
 
 ---
 
@@ -70,10 +71,10 @@ The **Room Service** manages the lifecycle and configuration of meetings. It is 
 
 ## 6. Participant Limit Logic
 
-While the Signaling Service enforces the *live* count, the Room Service defines the *policy*.
-*   The Room Service returns `maxParticipants: 4` in the room metadata.
-*   The Frontend checks this metadata.
-*   The Signaling Service checks the Redis Set size against this number.
+**Policy Definition (Source of Truth):**
+*   The Room Service **MUST** populate `maxParticipants: 4` (Phase 1) in the Redis Room Object (`room:{roomId}`).
+*   This dynamic value allows future paid tiers (e.g., max 10, max 50) without code changes in the Signaling Service.
+*   The **Signaling Service** reads this value during the Atomic Join (Lua script) to enforce the limit.
 
 ---
 

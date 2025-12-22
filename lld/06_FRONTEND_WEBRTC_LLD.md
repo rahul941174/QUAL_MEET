@@ -18,12 +18,15 @@ The application state machine drives the UI and logic:
 1.  **Login:** `POST /api/auth/login` -> Store JWT in LocalStorage/Memory.
 2.  **Check Room:** `GET /api/rooms/:id` -> Verify validity.
 3.  **Get ICE:** `GET /api/ice-servers` -> Store locally for `RTCPeerConnection`.
+4.  **Scheduled ICE Refresh:**
+    *   Set interval (e.g., every 45 minutes) to fetch new credentials from `/api/ice-servers`.
+    *   Update `rtcConfig` for any *future* reconnections/restarts (existing PCs might need manual update if logic allows, or just use for new connections).
 
 ---
 
 ## 3. WebSocket Interaction Flow
 
-1.  **Connect:** `io(URL, { query: { token } })`.
+1.  **Connect:** `io(URL, { auth: { token } })`. **(Query params are BANNED)**.
 2.  **Join:** `emit('join_room', { roomId })`.
 3.  **Listen:**
     *   `room_joined` -> Initialize Mesh.
@@ -41,12 +44,42 @@ We manage **One PC per Peer** (Mesh Topology).
 
 `peers = Map<userId, RTCPeerConnection>`
 
-**Creation:**
+**Creation with Constraints:**
 ```javascript
+// Hardcoded Phase 1 Constraints to prevent CPU melt
+const mediaConstraints = {
+    audio: true,
+    video: {
+        width: { ideal: 320 },
+        height: { ideal: 180 },
+        frameRate: { ideal: 15 }
+    }
+};
+
+const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
 const pc = new RTCPeerConnection({ iceServers });
-pc.onicecandidate = (e) => sendCandidate(targetId, e.candidate);
-pc.ontrack = (e) => attachVideoStream(targetId, e.streams[0]);
-localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+```
+
+**Monitor Connection State (The "Die vs. Restart" Logic):**
+```javascript
+pc.oniceconnectionstatechange = () => {
+    const state = pc.iceConnectionState;
+
+    if (state === 'disconnected') {
+        // Network blip? Attempt Restart immediately.
+        pc.restartIce();
+        showUiToast("Reconnecting...");
+    } else if (state === 'failed') {
+        // Fatal error. Wait 10s then kill.
+        setTimeout(() => {
+            if (pc.iceConnectionState === 'failed') {
+                peers.get(userId).close();
+                peers.delete(userId);
+                showUiToast("User disconnected");
+            }
+        }, 10000);
+    }
+};
 ```
 
 **Teardown:**

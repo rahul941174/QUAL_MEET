@@ -8,7 +8,7 @@ The **Auth Service** is the foundation of identity. It is responsible for verify
 *   **User Registration:** Validating input and storing new user credentials.
 *   **Authentication:** Verifying credentials (email/password) and issuing JWTs.
 *   **Password Security:** Hashing passwords using `bcrypt` (or Argon2).
-*   **Token Management:** Defining JWT payload structure and signing secrets.
+*   **Token Management:** Defining JWT payload structure and managing the **Private Key** for signing.
 
 ### Out of Scope
 *   **Session Management:** Stateless JWTs are used; no server-side sessions.
@@ -65,7 +65,8 @@ The **Auth Service** is the foundation of identity. It is responsible for verify
 4.  **JWT Generation:**
     *   **Payload:** `{ userId: user.id, email: user.email, name: user.full_name }`.
     *   **Expiration:** 24 Hours (`1d`).
-    *   **Algorithm:** HS256 (Phase 1) or RS256.
+    *   **Algorithm:** **RS256** (Asymmetric).
+    *   **Signing:** Sign using the **Private Key** stored securely in the Auth Service.
 5.  **Response:**
     *   Return `200 OK` `{ token: "ey..." }`.
 
@@ -73,9 +74,9 @@ The **Auth Service** is the foundation of identity. It is responsible for verify
 
 ## 5. JWT Generation Rules
 
-*   **Secret Management:**
-    *   `JWT_SECRET` must be loaded from environment variables (`process.env.JWT_SECRET`).
-    *   NEVER commit secrets to code.
+*   **Key Management:**
+    *   **Private Key:** Stored ONLY in Auth Service (Env var or Secret Manager). Used for **Signing**.
+    *   **Public Key:** Distributed to Gateway and Signaling Service. Used for **Verification**.
 *   **Payload Minimization:**
     *   Keep payload small to reduce network overhead on WebSocket handshakes.
     *   Include only essential identity data.
@@ -86,7 +87,7 @@ The **Auth Service** is the foundation of identity. It is responsible for verify
 
 (Used by API Gateway and Signaling Service, but defined here)
 
-*   **Signature Check:** Must match `JWT_SECRET`.
+*   **Signature Check:** Must verify using the **Public Key**.
 *   **Expiration Check:** Reject if `exp < current_time`.
 *   **Issuer Check (Optional):** Verify `iss` claim if added.
 

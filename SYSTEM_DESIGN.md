@@ -59,7 +59,7 @@ The system follows a **Microservices** architecture orchestrated within a Monore
 *   **Responsibilities:**
     *   User Registration (bcrypt password hashing).
     *   Login (Issue JWT).
-    *   JWT Validation logic (Public/Private key or Secret).
+    *   JWT Validation logic (**RS256** Public/Private key pair).
 
 ### 3.4 Room Service (`/room-service`)
 *   **Tech:** Node.js, PostgreSQL, Redis.
@@ -88,7 +88,7 @@ The system follows a **Microservices** architecture orchestrated within a Monore
     *   **Message Routing:** Relay SDP Offers, Answers, and ICE Candidates.
     *   **Scaling:** Use Redis Pub/Sub to allow users connected to *different* signaling nodes to communicate in the same room.
     *   **WebSocket Authentication:**
-        *   Clients **MUST** pass a JWT during the WebSocket handshake.
+        *   Clients **MUST** pass a JWT in the WebSocket **auth payload** (not URL query params).
         *   The signaling service verifies the JWT **locally** before allowing any room interaction.
         *   Connection is rejected if:
             *   Token is missing
@@ -117,6 +117,7 @@ CREATE TABLE meetings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   host_id UUID REFERENCES users(id),
   is_active BOOLEAN DEFAULT TRUE,
+  max_participants INTEGER DEFAULT 4,
   created_at TIMESTAMP DEFAULT NOW()
 );
 ```
@@ -127,7 +128,7 @@ CREATE TABLE meetings (
     *   Key: `presence:{roomId}:{userId}`
     *   Value: `timestamp` or `socketId` (Metadata)
     *   TTL: 30 seconds (Heartbeat refreshes this).
-    *   **Cleanup:** When a presence key expires, the signaling service treats the user as disconnected and emits a `user_left` event to remaining participants.
+    *   **Cleanup:** TTL is strictly for data cleanup in Redis. Detection of disconnected users relies on **WebSocket disconnection** events or **Client-side ICE state monitoring**, not Redis Key Expiry notifications (which are unreliable).
 *   **Room Cache:**
     *   Key: `room:{roomId}`
     *   Value: JSON object of room details.
