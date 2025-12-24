@@ -80,5 +80,5 @@ export async function loginUser(data:LoginRequestDTO){
         expiresIn:JWT_EXPIRES_IN,
     });
 
-    return {token};
+    return {token,user};
 }

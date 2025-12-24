@@ -2,6 +2,7 @@ import {Request,Response} from "express";
 import { SignupRequestDTO,LoginRequestDTO } from "../dto/auth.dto";
 import {signupUser,loginUser} from "../services/auth.service";
 import { AppError } from "../errors/AppError";
+import {SignupResponse,LoginResponse} from "@shared/types/auth"
 
 // POST /auth/signup
 export async function signup(req:Request,res:Response){
@@ -12,10 +13,11 @@ export async function signup(req:Request,res:Response){
 
         const user=await signupUser(data);
 
-        return res.status(501).json({
-            message:"User created successfully",
+        const response={
             user,
-        });
+        }satisfies SignupResponse;
+
+        return res.status(201).json(response);
     }
     catch(error:unknown){
         if(error instanceof AppError){
@@ -41,12 +43,14 @@ export async function login(req:Request,res:Response){
         //verifying req body data at compile time using dto, will not work at run time
         const data=req.body as LoginRequestDTO;
 
-        const result=await loginUser(data);
+        const {token,user}=await loginUser(data);
 
-        return res.status(200).json({
-            message:"Login successfully",
-            result,
-        });
+        const response={
+            token,
+            user,
+        }satisfies LoginResponse;
+
+        return res.status(200).json(response);
     }
     catch(error:unknown){
         if(error instanceof AppError){
