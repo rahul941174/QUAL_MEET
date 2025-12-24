@@ -4,7 +4,8 @@
   "workspaces": [
     "frontend",
     "auth-service",
-    "shared"
+    "shared",
+    "api-gateway"
   ],
   "scripts": {
     "dev": "echo \"Run services individually\""
