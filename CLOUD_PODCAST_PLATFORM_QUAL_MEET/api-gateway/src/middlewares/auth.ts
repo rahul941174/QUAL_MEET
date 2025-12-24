@@ -1,7 +1,7 @@
 import {Request,Response,NextFunction} from "express";
 import jwt from "jsonwebtoken";
 import { JWT_PUBLIC_KEY } from "../config/env";
-import { JwtPayload } from "@shared/types/auth";
+import { JwtPayload } from "@qualmeet/shared";
 
 export function authenticate(req:Request,res:Response,next:NextFunction){
 

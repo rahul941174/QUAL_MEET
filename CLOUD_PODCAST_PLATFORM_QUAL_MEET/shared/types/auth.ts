@@ -24,7 +24,7 @@ export interface LoginResponse {
 }
 
 /**
- * JWT payload shape (what other services trust)
+ * JWT payload shape (what other service will trust )
  */
 export interface JwtPayload {
   userId: string;

@@ -2,7 +2,7 @@ import {Request,Response} from "express";
 import { SignupRequestDTO,LoginRequestDTO } from "../dto/auth.dto";
 import {signupUser,loginUser} from "../services/auth.service";
 import { AppError } from "../errors/AppError";
-import {SignupResponse,LoginResponse} from "@shared/types/auth"
+import {SignupResponse,LoginResponse} from "@qualmeet/shared";
 
 // POST /auth/signup
 export async function signup(req:Request,res:Response){
