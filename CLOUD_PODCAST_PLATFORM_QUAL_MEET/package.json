@@ -6,9 +6,13 @@
     "auth-service",
     "shared",
     "api-gateway",
-    "room-service"
+    "room-service",
+    "signaling-service"
   ],
   "scripts": {
     "dev": "echo \"Run services individually\""
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

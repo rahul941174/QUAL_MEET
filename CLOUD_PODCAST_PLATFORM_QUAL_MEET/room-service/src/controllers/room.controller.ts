@@ -202,12 +202,12 @@ export async function authorizeRoomController(req:Request,res:Response){
   catch(error){
     if(error instanceof Error){
         if(error.message==="ROOM_NOT_EXIST"){
-          return res.status(403).json({
+          return res.status(404).json({
               error:"Room don't exist",
             });
         }
         if(error.message==="ROOM_NOT_ACTIVE"){
-            return res.status(403).json({
+            return res.status(409).json({
               error:"Room is inactive",
             });
         }
