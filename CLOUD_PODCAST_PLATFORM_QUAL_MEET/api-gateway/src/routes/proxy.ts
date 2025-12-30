@@ -46,3 +46,22 @@ export const roomProxy=createProxyMiddleware({
       },
     },
 });
+
+// turn-credential-service proxy (private route)
+export const turnProxy = createProxyMiddleware({
+  target: "http://localhost:4004",
+  changeOrigin: true,
+
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage) => {
+      const body = (req as any).body;
+      if (!body) return;
+
+      const bodyData = JSON.stringify(body);
+
+      proxyReq.setHeader("Content-Type", "application/json");
+      proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyData));
+      proxyReq.write(bodyData);
+    },
+  },
+});
