@@ -27,7 +27,7 @@ router.get(
     getRoomController,
 )
 
-router.get(
+router.post(
     "/:roomId/authorize",
     authorizeRoomController,
 )

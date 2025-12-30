@@ -7,7 +7,8 @@
     "shared",
     "api-gateway",
     "room-service",
-    "signaling-service"
+    "signaling-service",
+    "turn-credential-service"
   ],
   "scripts": {
     "dev": "echo \"Run services individually\""
