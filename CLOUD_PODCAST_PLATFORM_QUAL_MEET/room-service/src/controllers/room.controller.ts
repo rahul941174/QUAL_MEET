@@ -114,15 +114,6 @@ export async function leaveRoomController(req:Request,res:Response) {
 
     const result = await leaveRoom({roomId,userId});
 
-    if("closed" in result && result.closed){
-       return res.status(200).json(
-        {
-          message:"Room closed because host left",
-          result,
-        }
-       );
-    }
-
     return res.status(200).json(result);
   }
   catch(error){
