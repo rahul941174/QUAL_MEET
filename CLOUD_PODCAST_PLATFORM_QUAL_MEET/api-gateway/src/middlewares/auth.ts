@@ -5,7 +5,6 @@ import { JwtPayload } from "@qualmeet/shared";
 
 export function authenticate(req:Request,res:Response,next:NextFunction){
 
-    //Authorization:Bearer <token>
     const authHeader=req.headers.authorization;
 
     if(!authHeader){
@@ -23,6 +22,15 @@ export function authenticate(req:Request,res:Response,next:NextFunction){
             }
         )
     }
+
+
+    // const token = req.cookies?.access_token;
+
+    // if(!token){
+    //     return res.status(401).json({
+    //         error:"Authorization token missing",
+    //     });
+    // }
 
     try{
         //decodes the payload (id,email,fullName)

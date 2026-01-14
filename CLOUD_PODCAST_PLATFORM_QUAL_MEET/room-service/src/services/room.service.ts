@@ -80,7 +80,7 @@ export async function joinRoom(input:JoinRoomInput){
 
 
     //2. checking if user is not already joined in the room (checking unique abse on both room id and userid because @@unique([roomId,userId]))
-    const alreadyParticipant=await tx.roomParticipant.findUnique({
+    const existing=await tx.roomParticipant.findUnique({
       where:{
         roomId_userId:{
           roomId,
@@ -90,8 +90,13 @@ export async function joinRoom(input:JoinRoomInput){
     });
 
 
-    if(alreadyParticipant){
-      throw new Error("ALREADY_JOINED");
+    if(existing){
+      return {
+        roomId: existing.roomId,
+        userId: existing.userId,
+        role: existing.role,
+        joinedAt: existing.joinedAt,
+      };
     }
 
 
