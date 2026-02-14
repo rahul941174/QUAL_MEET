@@ -1,0 +1,67 @@
+# Auth Service LLD (Phase 2)
+
+## 1. Phase 2 Upgrades
+*   **Cookie Storage:** Move JWT from response body to HttpOnly Cookie.
+*   **Refresh Tokens (Optional):** If stricter security is required. (We will document the Cookie flow first).
+*   **Logout:** Explicit cookie clearing.
+
+---
+
+## 2. Cookie Configuration
+
+**Security Headers:**
+```typescript
+const COOKIE_OPTIONS = {
+  httpOnly: true,  // Prevent JS access (XSS protection)
+  secure: true,    // HTTPS only
+  sameSite: 'strict', // CSRF protection
+  maxAge: 24 * 60 * 60 * 1000 // 24 Hours
+};
+```
+
+---
+
+## 3. Login Flow (Updated)
+
+**Endpoint:** `POST /auth/login`
+
+1.  **Validate:** Email/Password check (Same as Phase 1).
+2.  **Generate JWT:** (Same as Phase 1).
+3.  **Set Cookie:**
+    ```typescript
+    res.cookie('access_token', token, COOKIE_OPTIONS);
+    ```
+4.  **Response:**
+    *   Return `200 OK` `{ user: UserDTO }`.
+    *   **NO TOKEN** in the JSON body.
+
+---
+
+## 4. Logout Flow (New)
+
+**Endpoint:** `POST /auth/logout`
+
+1.  **Clear Cookie:**
+    ```typescript
+    res.clearCookie('access_token', COOKIE_OPTIONS);
+    ```
+2.  **Response:** `200 OK`.
+
+---
+
+## 5. Signup Flow (Updated)
+
+**Endpoint:** `POST /auth/signup`
+
+1.  **Create User:** (Same as Phase 1).
+2.  **Auto-Login (Optional):**
+    *   Generate Token.
+    *   Set Cookie.
+    *   Return User DTO.
+
+---
+
+## 6. Key Rotation Strategy (Future)
+*   Store `kid` (Key ID) in JWT Header.
+*   Auth Service exposes `/.well-known/jwks.json` for Gateway to fetch Public Keys dynamically.
+*   (For Phase 2 start, stick to `.env` keys, but prepare for rotation).
