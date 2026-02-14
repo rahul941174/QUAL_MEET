@@ -34,8 +34,8 @@
 2.  **Fetch:** `GET /api/turn/ice-servers`.
 3.  **Update:**
     *   `pc.setConfiguration({ iceServers: newServers })`.
-    *   Note: This only affects *new* connections or restarts.
-    *   Trigger `pc.restartIce()` to force switch to new credentials if needed (seamless).
+    *   **Action:** Trigger `pc.restartIce()` immediately to negotiate using the new credential.
+    *   *Note:* Without `restartIce()`, the browser will keep using the old (expiring) credential until the connection drops. We want to preempt the drop.
 
 ---
 
@@ -46,6 +46,15 @@
 2.  **API Client:** `fetch(url, { credentials: 'include' })`.
 3.  **Socket.IO:** `io(url, { withCredentials: true })`.
     *   Browser automatically sends the HttpOnly cookie.
+
+### 4.1 Token Expiry Handling (Silent Refresh)
+
+**Interceptor Logic (Axios/Fetch Wrapper):**
+1.  **Call API:** Returns `401 Unauthorized`.
+2.  **Catch:**
+    *   Call `POST /auth/refresh` (Cookie-based).
+    *   **If 200 OK:** Retry original request.
+    *   **If 401 Unauthorized:** Redirect to `/login` (Session expired).
 
 ---
 

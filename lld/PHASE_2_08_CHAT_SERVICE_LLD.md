@@ -34,3 +34,18 @@ The **Chat Service** handles the persistence and retrieval of chat history.
 ## 4. Integration
 *   **Signaling Service** calls `POST /chats` asynchronously when it receives a `chat_message` via WebSocket.
 *   **Frontend** calls `GET /chats/:roomId` when opening the chat panel.
+
+---
+
+## 5. Failure Handling (Critical)
+
+**Policy:** "Broadcast First, Persist Async".
+
+1.  **Receive:** Signaling Service gets `chat_message`.
+2.  **Broadcast:** Immediately publish to Redis Pub/Sub (Real-time delivery).
+3.  **Persist:** Call Chat Service `POST /chats`.
+    *   **Success:** No action.
+    *   **Failure (500/Timeout):**
+        *   Log error: `Failed to persist chat message for room {id}`.
+        *   **Do NOT** retry indefinitely (to avoid blocking).
+        *   **Do NOT** fail the real-time broadcast.

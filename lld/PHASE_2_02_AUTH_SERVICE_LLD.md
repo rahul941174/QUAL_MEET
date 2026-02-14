@@ -61,7 +61,25 @@ const COOKIE_OPTIONS = {
 
 ---
 
-## 6. Key Rotation Strategy (Future)
+## 6. Refresh Token Flow
+
+**Endpoint:** `POST /auth/refresh`
+
+**Prerequisite:**
+*   `access_token` (Short-lived, e.g. 15m) -> In Memory or Cookie.
+*   `refresh_token` (Long-lived, e.g. 7d) -> **Strict HttpOnly Cookie Path=/auth/refresh**.
+
+**Flow:**
+1.  **Extract:** Read `req.cookies['refresh_token']`.
+2.  **Verify:** Check signature and DB whitelist (if implementing rotation).
+3.  **Issue:**
+    *   New Access Token.
+    *   New Refresh Token (Rotation).
+4.  **Set Cookies:** Update browser cookies.
+
+---
+
+## 7. Key Rotation Strategy (Future)
 *   Store `kid` (Key ID) in JWT Header.
 *   Auth Service exposes `/.well-known/jwks.json` for Gateway to fetch Public Keys dynamically.
 *   (For Phase 2 start, stick to `.env` keys, but prepare for rotation).
