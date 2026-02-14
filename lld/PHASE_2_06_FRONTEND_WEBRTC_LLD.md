@@ -30,7 +30,8 @@
 **Problem:** TURN credentials expire (e.g., 60 mins). Long meetings will fail.
 
 **Solution:**
-1.  **Timer:** `setInterval` (e.g., every 45 mins).
+1.  **Timer:** `setInterval` (every **8 minutes**).
+    *   *Reason:* TURN TTL is 10-15 mins. We must refresh *before* expiry.
 2.  **Fetch:** `GET /api/turn/ice-servers`.
 3.  **Update:**
     *   `pc.setConfiguration({ iceServers: newServers })`.
@@ -44,8 +45,10 @@
 **Changes:**
 1.  **Login:** No `localStorage.setItem('token')`.
 2.  **API Client:** `fetch(url, { credentials: 'include' })`.
-3.  **Socket.IO:** `io(url, { withCredentials: true })`.
-    *   Browser automatically sends the HttpOnly cookie.
+3.  **Socket.IO:**
+    *   **Client:** `io(url, { withCredentials: true, extraHeaders: { "x-client-version": "1.0" } })`
+    *   **Server:** MUST parse `socket.handshake.headers.cookie` explicitly.
+    *   *Note:* Standard `auth: { token }` payload is **removed**.
 
 ### 4.1 Token Expiry Handling (Silent Refresh)
 

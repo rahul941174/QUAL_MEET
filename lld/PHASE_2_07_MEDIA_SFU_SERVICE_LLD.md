@@ -59,4 +59,7 @@ This service does **not** have a WebSocket server. It communicates via **gRPC** 
 1.  **Detection:** Media Service detects child process exit.
 2.  **Cleanup:** Remove all Routers associated with that worker.
 3.  **Notification:** Inform Signaling Service that Room X is dead.
-4.  **Recovery:** Signaling Service tells clients to "Reload" -> Client rejoins -> New Router created on healthy worker.
+4.  **Orphaned State Cleanup:**
+    *   Signaling Service MUST clear the `room:{id}:router` key from Redis.
+    *   Signaling Service MUST clear `room:{id}:presence` to prevent ghost users.
+5.  **Recovery:** Signaling Service emits `error` event -> Frontend reloads page -> New Router assigned.

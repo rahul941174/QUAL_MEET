@@ -47,5 +47,6 @@ The **Chat Service** handles the persistence and retrieval of chat history.
     *   **Success:** No action.
     *   **Failure (500/Timeout):**
         *   Log error: `Failed to persist chat message for room {id}`.
-        *   **Do NOT** retry indefinitely (to avoid blocking).
-        *   **Do NOT** fail the real-time broadcast.
+        *   **Action:** Drop message from persistence queue.
+        *   **User Impact:** Message appears in real-time session but is lost if page is refreshed.
+        *   **Tradeoff:** Accepted for Phase 2 to prevent blocking the real-time pipe.

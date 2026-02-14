@@ -52,7 +52,7 @@ tls-listening-port=5349
 listening-ip=0.0.0.0
 
 # --- Public IP Announcement ---
-# external-ip=<PUBLIC_IP_ADDRESS>
+external-ip=<YOUR_PUBLIC_IP>
 
 # --- Authentication ---
 fingerprint
@@ -67,6 +67,7 @@ stale-nonce=600
 no-cli
 no-loopback-peers
 no-multicast-peers
+no-tcp-relay  # Optional: Force UDP for better performance if possible
 
 # --- Relay Ports ---
 min-port=40000
@@ -75,6 +76,11 @@ max-port=49999
 # --- TLS (Required for Phase 2) ---
 cert=/etc/letsencrypt/live/turn.qualmeet.com/fullchain.pem
 pkey=/etc/letsencrypt/live/turn.qualmeet.com/privkey.pem
+
+# --- Secret Rotation (Zero Downtime) ---
+# To rotate, add new secret as static-auth-secret
+# and move old secret to alternate-auth-secret (if supported)
+# OR restart service during maintenance window.
 ```
 
 ---
@@ -98,6 +104,12 @@ pkey=/etc/letsencrypt/live/turn.qualmeet.com/privkey.pem
 *   **Shared Secret:** All instances use the **same** `static-auth-secret`.
 *   **Load Balancing:** Use **DNS Round Robin** (Multiple A Records for `turn.qualmeet.com`).
 *   **Why DNS?** L4 Load Balancers (AWS NLB) can be expensive for high UDP throughput. DNS is free and sufficient for TURN logic (Client picks one IP).
+
+### 6.2 ICE Server Ordering (Critical)
+The Credential Service MUST return servers in this exact order:
+1.  `udp` (Best Performance)
+2.  `tcp` (Firewall Traversal)
+3.  `tls` (Strict Firewall Traversal - slowest but most reliable)
 
 ### 6.2 Geo-Distribution (Future)
 *   `us-east.turn.qualmeet.com`
