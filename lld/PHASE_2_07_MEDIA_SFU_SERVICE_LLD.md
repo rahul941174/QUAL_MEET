@@ -44,6 +44,7 @@ This service does **not** have a WebSocket server. It communicates via **gRPC** 
 
 **Constraint:** 1 Worker = 1 CPU Core.
 **Limit:** Approx 500 Consumers per Worker (conservative).
+**Max Routers/Worker:** 50 (Soft limit).
 
 **Load Balancing Logic:**
 1.  **Placement:** Signaling Service queries Media Service for "Least Loaded Worker" (by # of routers).

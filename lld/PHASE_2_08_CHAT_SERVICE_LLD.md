@@ -20,7 +20,7 @@ The **Chat Service** handles the persistence and retrieval of chat history.
 | `room_id` | UUID (Index) |
 | `sender_id` | UUID |
 | `content` | TEXT |
-| `created_at` | TIMESTAMP |
+| `created_at` | TIMESTAMP (Index) |
 
 ---
 

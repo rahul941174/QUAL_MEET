@@ -30,8 +30,8 @@
 **Problem:** TURN credentials expire (e.g., 60 mins). Long meetings will fail.
 
 **Solution:**
-1.  **Timer:** `setInterval` (every **8 minutes**).
-    *   *Reason:* TURN TTL is 10-15 mins. We must refresh *before* expiry.
+1.  **Timer:** `setInterval` (every **10 minutes**).
+    *   *Reason:* TURN TTL is 15 mins.
 2.  **Fetch:** `GET /api/turn/ice-servers`.
 3.  **Update:**
     *   `pc.setConfiguration({ iceServers: newServers })`.
@@ -59,9 +59,29 @@
     *   **If 200 OK:** Retry original request.
     *   **If 401 Unauthorized:** Redirect to `/login` (Session expired).
 
+### 4.2 WebSocket Auth Failure
+If `socket.connect()` fails with `Authentication error`:
+1.  Call `POST /auth/refresh`.
+2.  If Success: Retry `socket.connect()`.
+3.  If Failure: Redirect to Login.
+
 ---
 
-## 5. SFU Integration (Conceptual)
+## 5. Cleanup Strategy (Memory Leaks)
+**On Component Unmount:**
+1.  `socket.disconnect()`.
+2.  `pc.close()`.
+3.  `clearInterval(iceRefreshInterval)`.
+4.  Remove all event listeners.
+
+## 6. ICE Restart Cap
+*   **Limit:** Max 3 consecutive restart attempts.
+*   **Reset:** If state becomes `connected`, reset counter.
+*   **Failure:** If 3 attempts fail, show "Connection Lost" modal.
+
+---
+
+## 7. SFU Integration (Conceptual)
 
 **New Hook:** `useSFU(socket, roomId)`
 

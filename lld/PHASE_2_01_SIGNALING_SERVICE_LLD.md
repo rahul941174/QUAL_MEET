@@ -84,3 +84,48 @@ If the room is in **SFU Mode** (flag in Redis Room Cache):
 - [ ] Update `join_room` to use Redis Presence.
 - [ ] Implement `chat_message` handler + persistence.
 - [ ] Add `sfu_*` event handlers (proxy to Media Service).
+
+---
+
+## 7. Critical Failure Handling (Phase 2 Hardening)
+
+### 7.1 WebSocket Authentication Code
+```typescript
+io.use((socket, next) => {
+  const cookie = socket.handshake.headers.cookie;
+  if (!cookie) return next(new Error("Authentication error"));
+
+  const token = parseCookie(cookie)['access_token'];
+  try {
+    const decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
+    socket.data.user = decoded;
+    next();
+  } catch (err) {
+    next(new Error("Authentication error"));
+  }
+});
+```
+
+### 7.2 Cache Miss Strategy (Room Mode)
+If `GET room:{id}` returns null (TTL expired):
+1.  **Read-Through:** Call Room Service internal API (`GET /internal/rooms/:id`).
+2.  **Populate:** Write to Redis `room:{id}` with TTL 1h.
+3.  **Proceed:** Use fetched data.
+
+### 7.3 Media Service Total Crash
+If Media Service (all workers) is unreachable:
+1.  **Detect:** Timeout on `sfu_create_transport`.
+2.  **Action:**
+    *   Emit `error` to client: "Media Server Unavailable".
+    *   Downgrade to P2P if participants < 4 (Optional).
+    *   Prevent further `sfu_*` requests until health check passes.
+
+### 7.4 Graceful Shutdown
+```typescript
+process.on('SIGTERM', async () => {
+  io.close(); // Stop accepting new connections
+  await redisPub.quit();
+  await redisSub.quit();
+  process.exit(0);
+});
+```

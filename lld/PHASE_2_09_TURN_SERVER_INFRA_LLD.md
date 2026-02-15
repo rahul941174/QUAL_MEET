@@ -58,6 +58,7 @@ external-ip=<YOUR_PUBLIC_IP>
 fingerprint
 use-auth-secret
 static-auth-secret=<YOUR_LONG_RANDOM_SECRET>
+# alternate-auth-secret=<PREVIOUS_SECRET>  (Enable for rotation)
 realm=turn.qualmeet.com
 total-quota=100
 bps-capacity=0
@@ -76,11 +77,6 @@ max-port=49999
 # --- TLS (Required for Phase 2) ---
 cert=/etc/letsencrypt/live/turn.qualmeet.com/fullchain.pem
 pkey=/etc/letsencrypt/live/turn.qualmeet.com/privkey.pem
-
-# --- Secret Rotation (Zero Downtime) ---
-# To rotate, add new secret as static-auth-secret
-# and move old secret to alternate-auth-secret (if supported)
-# OR restart service during maintenance window.
 ```
 
 ---

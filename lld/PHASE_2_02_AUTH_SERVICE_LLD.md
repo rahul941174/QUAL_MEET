@@ -76,10 +76,29 @@ const COOKIE_OPTIONS = {
     *   New Access Token.
     *   New Refresh Token (Rotation).
 4.  **Set Cookies:** Update browser cookies.
+5.  **CSRF Check:** This endpoint MUST check `Origin` or `Sec-Fetch-Site` to prevent cross-site invocation.
 
 ---
 
-## 7. Key Rotation Strategy (Future)
+## 7. Database Schema (Refresh Tokens)
+
+**Table: `refresh_tokens`**
+| Column | Type |
+| :--- | :--- |
+| `id` | UUID (PK) |
+| `user_id` | UUID (Index) |
+| `token_hash` | VARCHAR(255) |
+| `expires_at` | TIMESTAMP |
+| `revoked` | BOOLEAN |
+| `device_info` | VARCHAR(255) |
+
+**Logic:**
+*   On Refresh: `UPDATE refresh_tokens SET revoked=true WHERE id=old_id`.
+*   On Logout: `UPDATE refresh_tokens SET revoked=true WHERE user_id=...`.
+
+---
+
+## 8. Key Rotation Strategy (Future)
 *   Store `kid` (Key ID) in JWT Header.
 *   Auth Service exposes `/.well-known/jwks.json` for Gateway to fetch Public Keys dynamically.
 *   (For Phase 2 start, stick to `.env` keys, but prepare for rotation).
