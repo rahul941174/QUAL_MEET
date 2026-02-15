@@ -12,10 +12,18 @@
 **Security Headers:**
 ```typescript
 const COOKIE_OPTIONS = {
-  httpOnly: true,  // Prevent JS access (XSS protection)
-  secure: true,    // HTTPS only
-  sameSite: 'strict', // CSRF protection
-  maxAge: 24 * 60 * 60 * 1000 // 24 Hours
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax', // Allow top-level navigation, block cross-site POST
+  maxAge: 15 * 60 * 1000 // 15 Minutes (Short-lived Access)
+};
+
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  path: '/auth/refresh',
+  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 Days
 };
 ```
 
@@ -76,7 +84,9 @@ const COOKIE_OPTIONS = {
     *   New Access Token.
     *   New Refresh Token (Rotation).
 4.  **Set Cookies:** Update browser cookies.
-5.  **CSRF Check:** This endpoint MUST check `Origin` or `Sec-Fetch-Site` to prevent cross-site invocation.
+5.  **CSRF Check:**
+    *   **Strict Origin:** Request must originate from `https://app.qualmeet.com`.
+    *   **Double Submit:** Verify `X-CSRF-Token` header matches `csrf_token` cookie.
 
 ---
 

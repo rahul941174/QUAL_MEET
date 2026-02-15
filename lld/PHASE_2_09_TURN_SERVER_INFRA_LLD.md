@@ -63,6 +63,9 @@ realm=turn.qualmeet.com
 total-quota=100
 bps-capacity=0
 stale-nonce=600
+# --- Abuse Protection ---
+cli-password-limit=10  # Prevent password brute force
+max-bps=5000000        # 5 Mbps limit per allocation (prevent DDoS)
 
 # --- Security ---
 no-cli

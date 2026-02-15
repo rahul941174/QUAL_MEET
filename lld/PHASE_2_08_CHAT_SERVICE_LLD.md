@@ -35,6 +35,11 @@ The **Chat Service** handles the persistence and retrieval of chat history.
 *   **Signaling Service** calls `POST /chats` asynchronously when it receives a `chat_message` via WebSocket.
 *   **Frontend** calls `GET /chats/:roomId` when opening the chat panel.
 
+### 4.1 Internal Authentication
+*   **Middleware:** Validate `X-Internal-Service-Key` header.
+*   **Reject:** 401 if header missing or invalid.
+*   **Trust:** Only trust requests from Signaling Service with this key.
+
 ---
 
 ## 5. Failure Handling (Critical)

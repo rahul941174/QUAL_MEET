@@ -30,6 +30,11 @@ This service does **not** have a WebSocket server. It communicates via **gRPC** 
 *   `POST /transports` (Create WebRTC Transport)
 *   `POST /producers` (Connect Producer)
 *   `POST /consumers` (Connect Consumer)
+*   `DELETE /routers/:roomId` (Cleanup Router on Room Close)
+
+### 3.1 Internal Authentication
+*   **Middleware:** Validate `X-Internal-Service-Key`.
+*   **Reject:** 401 if invalid.
 
 ---
 
