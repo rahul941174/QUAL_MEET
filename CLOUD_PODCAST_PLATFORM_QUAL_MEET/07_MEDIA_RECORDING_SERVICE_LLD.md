@@ -88,7 +88,9 @@ If URL generation fails (e.g., S3/R2 downtime):
 **Endpoint:** `POST /media/recordings/upload-url`
 **Description:** Requests a pre-signed URL to upload a specific chunk.
 **Security & Abuse Prevention:**
+*   **Ownership:** `if (session.user_id !== userId) return 403;`
 *   **Max Chunks:** Reject if `chunkIndex > MAX_CHUNKS` (e.g., 1800 for a 30m recording at 1 chunk/sec).
+*   **Sequence Enforcement:** Strictly enforce that `chunkIndex` does not jump abruptly (e.g., receiving chunk `999` first is forbidden).
 *   **URL Spam Protection:** Track requested URLs. Limit a user to maximum 2 pending (unconfirmed) chunk URLs at a time.
 *   **File Type Enforcement:** Enforce object key pattern `chunk_XXXX.webm`.
 **Request:**
@@ -109,7 +111,8 @@ If URL generation fails (e.g., S3/R2 downtime):
 ### 4.3. Confirm Chunk Upload
 **Endpoint:** `POST /media/recordings/chunk-complete`
 **Description:** Called by frontend AFTER a successful PUT to S3/R2 to mark `uploaded=true` in DB.
-**Idempotency:**
+**Security & Idempotency:**
+*   **Ownership Check:** `if (session.user_id !== userId) return 403;`
 *   Uses `UNIQUE(recording_id, chunk_index)`.
 *   If `already_uploaded === true`, return 200 OK without errors.
 **Request:**
@@ -123,7 +126,8 @@ If URL generation fails (e.g., S3/R2 downtime):
 ### 4.4. Complete Recording
 **Endpoint:** `POST /media/recordings/complete`
 **Description:** Called when the client stops recording. Enqueues the merge job.
-**Idempotency & Recovery:**
+**Security, Idempotency & Recovery:**
+*   **Ownership Check:** `if (session.user_id !== userId) return 403;`
 *   **Idempotency:** If `status !== "recording"`, immediately return `{ status: "already_processing" }` to prevent multiple FFmpeg jobs.
 *   **Partial Upload Recovery:** Check for missing chunks (`where uploaded=false`). If missing chunks exist, return a 400 error including a list of the `missingChunks` so the frontend can wait and retry upload/completion, rather than failing the whole session.
 **Request:**
@@ -160,7 +164,13 @@ To prevent blocking the Node.js event loop and crashing under heavy load, mergin
 **Constraints:**
 *   **Max Duration Limit:** Enforce `MAX_RECORDING_DURATION = 30 min` to prevent disk/memory explosions during the merge phase.
 
-**Worker Flow:**
+**Worker Flow & Setup:**
+```typescript
+// 🛡️ SECURITY: Concurrency Control
+// Prevents unlimited parallel ffmpeg jobs from melting the CPU
+new Worker(queueName, processor, { concurrency: 2 });
+```
+
 1.  **Consume Job:** Worker picks up `sessionId`.
 2.  **Fetch:** Stream or download all confirmed chunks for the session from S3/R2 to a temporary local directory.
 3.  **Validate Types:** Verify files are valid WebM files during the fetch phase (fail if junk uploaded).

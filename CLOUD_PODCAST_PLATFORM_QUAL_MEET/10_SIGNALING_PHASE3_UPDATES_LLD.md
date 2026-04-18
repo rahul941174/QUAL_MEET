@@ -32,7 +32,12 @@ socket.on("chat_message", async (data) => {
 
   if (!roomId) return;
 
+  // 🛡️ SECURITY: Empty Message Check
+  if (!data.content || !data.content.trim()) return;
+
   // 🛡️ SECURITY: Room Membership Validation (Prevent Spoofing/Stale state)
+  // MANDATORY DOCUMENTATION: `room:${roomId}:users` MUST be a Redis SET across the entire system.
+  // Using SISMEMBER guarantees consistency with the room-join Lua script.
   const isMember = await redisClient.sismember(`room:${roomId}:users`, user.userId);
   if (!isMember) return;
 

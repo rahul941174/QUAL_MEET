@@ -15,8 +15,8 @@ This hook manages the `MediaRecorder` instance, chunk slicing, and sequential up
 2.  Check MIME type compatibility (Safari/Firefox fallbacks).
 3.  Capture local media stream chunks (1-2 second intervals).
 4.  Manage an explicit sequential upload queue to prevent parallel request chaos.
-5.  Handle upload chunk timeouts.
-6.  Handle browser closures (`beforeunload`).
+5.  Handle upload chunk timeouts and strictly requeue failed chunks.
+6.  Handle browser closures (`beforeunload`) and cleanly remove listeners.
 7.  Display clear Error State UI.
 
 ### 2.2. Recording Flow
@@ -38,6 +38,10 @@ const uploadQueue = [];
 let isUploading = false;
 
 // 🛡️ RELIABILITY: Prevent accidental loss
+const handleTabClose = (e) => {
+  e.preventDefault();
+  e.returnValue = ''; // Trigger browser warning
+};
 window.addEventListener("beforeunload", handleTabClose);
 ```
 
@@ -48,7 +52,7 @@ recorder.ondataavailable = async (event) => {
     const chunk = event.data;
     const currentIndex = chunkIndex++;
 
-    uploadQueue.push({ chunk, index: currentIndex });
+    uploadQueue.push({ chunk, index: currentIndex, retries: 0 });
     processQueue();
   }
 };
@@ -57,14 +61,15 @@ async function processQueue() {
   if (isUploading || uploadQueue.length === 0) return;
   isUploading = true;
 
-  const { chunk, index } = uploadQueue.shift();
+  const currentTask = uploadQueue.shift();
+  const { chunk, index, retries } = currentTask;
 
   try {
     const { uploadUrl } = await api.getUploadUrl(sessionId, index);
 
     // 🛡️ RELIABILITY: Timeout + Retry
-    const uploadTask = uploadChunkWithRetry(uploadUrl, chunk, 3);
-    const timeoutTask = new Promise((_, reject) => setTimeout(() => reject("Upload Timeout"), 10000));
+    const uploadTask = uploadChunk(uploadUrl, chunk);
+    const timeoutTask = new Promise((_, reject) => setTimeout(() => reject(new Error("Upload Timeout")), 10000));
 
     await Promise.race([uploadTask, timeoutTask]);
 
@@ -72,9 +77,14 @@ async function processQueue() {
     await api.confirmChunkComplete(sessionId, index);
   } catch (error) {
     console.error(`Chunk ${index} failed:`, error);
-    // UI: Show "Recording failed / network error"
-    showErrorStateUI("Upload failed. Retrying...");
-    // Depending on policy, requeue or abort session
+
+    // 🛡️ RELIABILITY: Explicit Requeue Logic
+    if (retries < 3) {
+      uploadQueue.unshift({ chunk, index, retries: retries + 1 });
+    } else {
+      showErrorStateUI("Upload critically failed. Recording may be incomplete.");
+      // Depending on strictness, abort session here.
+    }
   } finally {
     isUploading = false;
     processQueue(); // Process next in queue
@@ -87,11 +97,19 @@ recorder.start(2000);
 **3. Stop Recording (Queue Flush Safety):**
 ```typescript
 recorder.stop();
+window.removeEventListener("beforeunload", handleTabClose);
 
-// 🛡️ RELIABILITY: Final Queue Flush Safety
-// Wait until the queue is completely empty and no active upload is running
-while (uploadQueue.length > 0 || isUploading) {
+// 🛡️ RELIABILITY: Final Queue Flush Safety (Prevent Infinite Loop)
+const MAX_WAIT = 30000;
+const start = Date.now();
+
+while ((uploadQueue.length > 0 || isUploading) && Date.now() - start < MAX_WAIT) {
   await new Promise(resolve => setTimeout(resolve, 500));
+}
+
+if (uploadQueue.length > 0 || isUploading) {
+  showErrorStateUI("Upload queue stuck. Recording is incomplete.");
+  throw new Error("Upload queue stuck");
 }
 
 try {
