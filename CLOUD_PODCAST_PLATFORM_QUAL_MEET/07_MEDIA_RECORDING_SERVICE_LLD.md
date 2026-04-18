@@ -1,17 +1,18 @@
-# Media Recording Service LLD (Phase 3)
+# Media Recording Service LLD (Phase 3 Final)
 
 ## 1. Responsibility
 The **Media Recording Service** handles the distributed recording pipeline for QUAL_MEET. It orchestrates chunk uploads from clients, ensures data integrity, and produces the final merged video without proxying media traffic through the backend.
 
 ### Responsibilities
 *   **Upload Coordination:** Generating pre-signed URLs for direct client uploads to Cloud storage (AWS S3 or Cloudflare R2).
-*   **Tracking:** Managing recording sessions and tracking the upload state of individual video chunks.
-*   **Merging:** Running FFmpeg to concatenate chunks into a final HD `.webm` file per user.
+*   **Tracking:** Managing recording sessions and tracking the upload state of individual video chunks via explicit completion APIs.
+*   **Merging:** Using background jobs (BullMQ) to run FFmpeg and concatenate chunks into a final HD `.webm` file per user.
 *   **Delivery:** Providing the final video URL upon completion.
+*   **Security & Validation:** Enforcing ownership, room validation, and strict duration limits.
 
 ### Non-Responsibilities
 *   **Media Proxying:** The backend MUST NOT receive or proxy video chunks directly from the frontend.
-*   **Cloudinary:** Cloudinary is explicitly forbidden due to reliability issues with chunking.
+*   **Cloudinary:** Cloudinary is explicitly forbidden.
 
 ---
 
@@ -29,6 +30,11 @@ recordings/
       ...
       final.webm
 ```
+
+### 2.1 Storage Failure Handling
+If URL generation fails (e.g., S3/R2 downtime):
+*   Return 503 Service Unavailable.
+*   Frontend must queue the chunk and retry backoff.
 
 ---
 
@@ -50,7 +56,7 @@ recordings/
 | `id`           | UUID (PK) | Unique chunk ID                      |
 | `recording_id` | UUID (FK) | Reference to the `recordings` table  |
 | `chunk_index`  | INTEGER   | Sequential order of the chunk (Crucial) |
-| `uploaded`     | BOOLEAN   | True if upload is confirmed          |
+| `uploaded`     | BOOLEAN   | True if upload is confirmed via explicit API |
 
 ---
 
@@ -59,11 +65,14 @@ recordings/
 ### 4.1. Initialize Recording Session
 **Endpoint:** `POST /media/recordings/init`
 **Description:** Called by the client when recording starts.
+**Auth & Security:**
+*   MUST extract `userId` from headers (`x-user-id` injected by Gateway), NOT the body.
+*   Must validate that the user is actually in the requested `roomId` (via internal call to Room Service).
+*   Enforce a limit of **1 active recording session per user**.
 **Request:**
 ```json
 {
-  "roomId": "abc-def-ghi",
-  "userId": "user-123"
+  "roomId": "abc-def-ghi"
 }
 ```
 **Response:**
@@ -73,9 +82,10 @@ recordings/
 }
 ```
 
-### 4.2. Get Upload URL (Core API)
+### 4.2. Get Upload URL
 **Endpoint:** `POST /media/recordings/upload-url`
 **Description:** Requests a pre-signed URL to upload a specific chunk.
+**Auth:** Must validate session ownership (`userId` matches session).
 **Request:**
 ```json
 {
@@ -91,9 +101,22 @@ recordings/
 }
 ```
 
-### 4.3. Complete Recording
+### 4.3. Confirm Chunk Upload (NEW)
+**Endpoint:** `POST /media/recordings/chunk-complete`
+**Description:** Called by frontend AFTER a successful PUT to S3/R2 to mark `uploaded=true` in DB.
+**Request:**
+```json
+{
+  "sessionId": "rec_12345",
+  "chunkIndex": 1
+}
+```
+
+### 4.4. Complete Recording
 **Endpoint:** `POST /media/recordings/complete`
-**Description:** Called when the client stops recording. Triggers the merge pipeline.
+**Description:** Called when the client stops recording. Enqueues the merge job.
+**Validation:**
+*   Must check if there are any missing chunks (`where uploaded=false`). If missing chunks exist, return a 400 error ("Upload incomplete") so the frontend can wait and retry completion.
 **Request:**
 ```json
 {
@@ -107,9 +130,9 @@ recordings/
 }
 ```
 
-### 4.4. Get Recording Status
+### 4.5. Get Recording Status
 **Endpoint:** `GET /media/recordings/:sessionId`
-**Description:** Poll or fetch the final status of the recording.
+**Auth:** Must validate session ownership.
 **Response:**
 ```json
 {
@@ -120,31 +143,29 @@ recordings/
 
 ---
 
-## 5. Merging Pipeline (FFmpeg)
+## 5. Merging Pipeline (BullMQ + FFmpeg)
 
-When `complete` is called, the service executes the following workflow:
+To prevent blocking the Node.js event loop and crashing under heavy load, merging is moved to a background worker queue (BullMQ backed by Redis).
 
-1.  **Validation:** Query `recording_chunks` to ensure all chunks from `0` to `max(chunk_index)` are marked `uploaded = true`.
-2.  **Fetch:** Download all chunks for the session from S3/R2 to a temporary local directory.
+**Constraints:**
+*   **Max Duration Limit:** Enforce `MAX_RECORDING_DURATION = 30 min` to prevent disk/memory explosions during the merge phase.
+
+**Worker Flow:**
+1.  **Consume Job:** Worker picks up `sessionId`.
+2.  **Fetch:** Stream or download all confirmed chunks for the session from S3/R2 to a temporary local directory.
 3.  **Sort:** Sort files strictly by `chunk_index`.
-4.  **List Generation:** Create a `filelist.txt`:
-    ```text
-    file 'chunk_0001.webm'
-    file 'chunk_0002.webm'
-    ...
-    ```
-5.  **Merge Command:**
-    ```bash
-    ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.webm
-    ```
+4.  **List Generation:** Create `filelist.txt`.
+5.  **Merge Command:** `ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.webm`
 6.  **Upload:** Upload `output.webm` back to S3/R2 as `final.webm`.
-7.  **Cleanup:** Delete the temporary directory and update DB status.
+7.  **Cleanup Policy (Critical):**
+    *   Delete local temporary files immediately.
+    *   Trigger an S3/R2 deletion of all individual chunk files (`chunk_0001.webm`, etc.) to save storage costs.
+8.  **Update DB:** Set status to `completed`.
 
 ---
 
 ## 6. Failure & Reliability Handling
 
-*   **Missing Chunks:** If the DB indicates missing chunks during the `complete` phase, the service can either wait (if the client is retrying) or skip the missing chunk and merge the rest (with a slight jump in the video).
-*   **Out-of-Order Uploads:** Handled implicitly because the merge pipeline sorts files by `chunk_index` before concatenation.
-*   **Duplicate Chunks:** S3/R2 PUT operations are idempotent. A duplicate upload simply overwrites the existing chunk.
-*   **Merge Failure:** If FFmpeg fails, set `status = failed`. Retries can be manually triggered or queued.
+*   **Merge Retry Strategy:** If FFmpeg or the final S3 upload fails, BullMQ will automatically retry the job 3 times with exponential backoff before marking it `failed`.
+*   **Missing Chunks Race Condition:** Prevented by step 4.4; the backend refuses to enqueue the job until the frontend confirms all generated URLs have been uploaded successfully.
+*   **Duplicate Chunks:** S3/R2 PUT operations are idempotent. Overwrites are safe.

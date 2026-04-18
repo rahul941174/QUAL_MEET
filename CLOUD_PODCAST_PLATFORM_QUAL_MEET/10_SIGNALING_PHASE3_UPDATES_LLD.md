@@ -1,4 +1,4 @@
-# Signaling Service Phase 3 Updates LLD
+# Signaling Service Phase 3 Updates LLD (Final)
 
 ## 1. Responsibility (Updated)
 The Signaling Service is the core real-time orchestrator. In Phase 3, we avoid creating a standalone chat service to reduce complexity.
@@ -16,24 +16,41 @@ The Signaling Service handles:
 ### 2.1. Event: `chat_message`
 **Client → Server**
 ```typescript
-socket.emit("chat_message", { content });
+// Note: Frontend must generate a tempId to prevent optimistic UI duplicates
+socket.emit("chat_message", { content, tempId });
 ```
 
-### 2.2. Server Handling (CRITICAL FLOW)
-The server must broadcast the message in real-time, then persist it asynchronously without blocking the event loop.
+### 2.2. Server Handling & Security (CRITICAL FLOW)
+The server must broadcast the message in real-time, persist it asynchronously, and strictly protect against SPAM and XSS.
 
 ```typescript
+import sanitizeHtml from "sanitize-html";
+
 socket.on("chat_message", async (data) => {
   const user = socket.data.user;
   const roomId = socketToRoom.get(socket.id);
 
   if (!roomId) return;
 
+  // 🛡️ SECURITY: Size Limit
+  if (data.content.length > 1000) return;
+
+  // 🛡️ SECURITY: Rate Limiting (SPAM Protection)
+  const rateKey = `chat:rate:${user.userId}`;
+  const count = await redisClient.incr(rateKey);
+  if (count === 1) await redisClient.expire(rateKey, 5);
+  if (count > 10) return; // Block spammer
+
+  // 🛡️ SECURITY: XSS Sanitization (NEVER trust frontend)
+  const cleanContent = sanitizeHtml(data.content);
+
+  const realId = crypto.randomUUID();
   const message = {
-    id: crypto.randomUUID(),
+    id: realId,
+    tempId: data.tempId, // Send back so frontend can resolve optimistic UI
     roomId,
     senderId: user.userId,
-    content: data.content,
+    content: cleanContent,
     createdAt: new Date().toISOString()
   };
 
@@ -47,8 +64,11 @@ socket.on("chat_message", async (data) => {
   );
 
   // 🔥 2. PERSIST ASYNC (NON-BLOCKING)
-  saveMessageToDB(message).catch(err => {
-    console.error("Chat persist failed:", err);
+  // Use a simple queue or setImmediate to avoid blocking the hot path event loop
+  setImmediate(() => {
+    saveMessageToDB(message).catch(err => {
+      console.error("Chat persist failed:", err);
+    });
   });
 });
 ```
@@ -88,8 +108,7 @@ To allow late-joiners to retrieve chat history, the signaling service (or a smal
 
 ## 5. Rules (VERY IMPORTANT)
 *   ✅ **Broadcast first:** Real-time delivery is the highest priority.
-*   ❌ **NEVER block event loop:** Do not await the DB write before broadcasting.
-*   ❌ **NEVER await DB write in hot path.**
+*   ❌ **NEVER block event loop:** Do not await the DB write before broadcasting. Use `setImmediate` or a worker queue to prevent DB latency from affecting WebRTC signaling.
 
 ---
 
@@ -97,6 +116,6 @@ To allow late-joiners to retrieve chat history, the signaling service (or a smal
 
 | Issue | Behavior |
 | :--- | :--- |
-| **DB down** | Message is still delivered in real-time (history lost). |
+| **DB down** | Message is still delivered in real-time (history lost). System doesn't crash due to async/catch block. |
 | **Redis down** | Chat disabled (fail safe). System degrades safely. |
 | **Duplicate message** | Ignored by clients using the unique `id`. |

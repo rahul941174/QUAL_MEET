@@ -1,60 +1,92 @@
-# Frontend Phase 3 Updates LLD
+# Frontend Phase 3 Updates LLD (Final)
 
 ## 1. Goal
-Implement the client-side logic for the Distributed Recording System and the Chat UI without breaking the existing WebRTC P2P mesh or Cookie Auth flow.
+Implement the client-side logic for the Distributed Recording System and the Chat UI securely and reliably.
 
 ---
 
 ## 2. Distributed Recording Implementation
 
 ### 2.1. The `useRecording` Hook
-This hook manages the `MediaRecorder` instance, chunk slicing, and upload coordination.
+This hook manages the `MediaRecorder` instance, chunk slicing, and sequential upload coordination to prevent network saturation.
 
 **Core Responsibilities:**
-1.  Initialize recording session with the backend.
-2.  Capture local media stream chunks (1-2 second intervals).
-3.  Request pre-signed URLs.
-4.  Upload chunks directly to S3/R2.
-5.  Handle upload retries sequentially.
+1.  Initialize recording session.
+2.  Check MIME type compatibility (Safari/Firefox fallbacks).
+3.  Capture local media stream chunks (1-2 second intervals).
+4.  Manage an explicit sequential upload queue to prevent parallel request chaos.
+5.  Handle upload chunk timeouts.
+6.  Handle browser closures (`beforeunload`).
 
 ### 2.2. Recording Flow
 
-**1. Start Recording:**
+**1. Setup & Start:**
 ```typescript
+// 🛡️ SECURITY: MIME Compatibility
+const mimeType = 'video/webm;codecs=vp8,opus';
+if (!MediaRecorder.isTypeSupported(mimeType)) {
+  // Fallback to generic webm or mp4 depending on browser
+}
+
 const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-const recorder = new MediaRecorder(mediaStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+const recorder = new MediaRecorder(mediaStream, { mimeType });
 let chunkIndex = 0;
+
+// 🛡️ RELIABILITY: Queue System
+const uploadQueue = [];
+let isUploading = false;
+
+// 🛡️ RELIABILITY: Prevent accidental loss
+window.addEventListener("beforeunload", handleTabClose);
 ```
 
-**2. Chunk Handling (`ondataavailable`):**
+**2. Chunk Handling (`ondataavailable`) & Explicit Queue:**
 ```typescript
 recorder.ondataavailable = async (event) => {
   if (event.data && event.data.size > 0) {
     const chunk = event.data;
     const currentIndex = chunkIndex++;
 
-    // 1. Get pre-signed URL from backend
-    const { uploadUrl } = await api.getUploadUrl(sessionId, currentIndex);
-
-    // 2. Upload directly to S3/R2 with sequential retry logic
-    await uploadChunkWithRetry(uploadUrl, chunk);
+    uploadQueue.push({ chunk, index: currentIndex });
+    processQueue();
   }
 };
 
-// Start slicing every 2000ms
+async function processQueue() {
+  if (isUploading || uploadQueue.length === 0) return;
+  isUploading = true;
+
+  const { chunk, index } = uploadQueue.shift();
+
+  try {
+    const { uploadUrl } = await api.getUploadUrl(sessionId, index);
+
+    // 🛡️ RELIABILITY: Timeout + Retry
+    const uploadTask = uploadChunkWithRetry(uploadUrl, chunk, 3);
+    const timeoutTask = new Promise((_, reject) => setTimeout(() => reject("Upload Timeout"), 10000));
+
+    await Promise.race([uploadTask, timeoutTask]);
+
+    // 🛡️ RELIABILITY: Confirm upload to backend
+    await api.confirmChunkComplete(sessionId, index);
+  } catch (error) {
+    console.error(`Chunk ${index} failed:`, error);
+    // Depending on policy, requeue or abort session
+  } finally {
+    isUploading = false;
+    processQueue(); // Process next in queue
+  }
+}
+
 recorder.start(2000);
 ```
 
 **3. Stop Recording:**
 ```typescript
 recorder.stop();
-// Wait for any pending chunk uploads to finish in the queue
+// Wait for `uploadQueue` to empty and `isUploading` to be false
 await api.completeRecording(sessionId);
 ```
-
-### 2.3. Upload Reliability (Critical)
-*   **Sequential Queue:** To avoid 10 parallel PUT requests causing network congestion, the hook must use a queue. Chunks should be uploaded sequentially or with a strict concurrency limit (e.g., 2).
-*   **Retry Logic:** If a PUT request to the `uploadUrl` fails, retry up to 3 times before marking the chunk as failed.
 
 ---
 
@@ -62,26 +94,30 @@ await api.completeRecording(sessionId);
 
 ### 3.1. Components
 *   `ChatPanel`: A sidebar toggled via the control bar.
-*   `MessageList`: Displays messages. Should auto-scroll to bottom on new messages.
+*   `MessageList`: Displays messages. Should auto-scroll to bottom.
 *   `ChatInput`: Text input field.
 
-### 3.2. Socket & State Flow
-1.  **On Mount:** `GET /api/chats/:roomId` to load history.
-2.  **Sending:**
+### 3.2. Socket & State Flow (Fixing Duplicates)
+Optimistic UI updates cause duplicates if the server broadcasts the same message back.
+
+1.  **Sending (Optimistic UI):**
     ```typescript
-    socket.emit("chat_message", { content: textInput });
+    const tempId = `temp-${Date.now()}`;
+    const newMsg = { id: tempId, content: textInput, senderId: myId, createdAt: new Date() };
+
+    setMessages(prev => [...prev, newMsg]); // Optimistic update
+    socket.emit("chat_message", { content: textInput, tempId });
     ```
-    *Optimistic UI update:* Immediately append the message to local state.
-3.  **Receiving:**
+2.  **Receiving:**
     ```typescript
     socket.on("chat_message", (message) => {
-      setMessages(prev => [...prev, message]);
+      setMessages(prev => {
+        // 🛡️ RELIABILITY: Replace optimistic temp message OR ignore existing real duplicates
+        const exists = prev.find(m => m.id === message.id);
+        if (exists) return prev;
+
+        const filtered = prev.filter(m => m.id !== message.tempId);
+        return [...filtered, message];
+      });
     });
     ```
-
----
-
-## 4. Stability Constraints
-*   **Do Not Touch ICE Logic:** The existing ICE restart and TURN refresh logic must remain untouched.
-*   **Auth:** Continue using `credentials: "include"` for all fetch calls.
-*   **Screen Share Lock:** Ensure starting a recording does not interfere with the Redis screen share lock logic.
