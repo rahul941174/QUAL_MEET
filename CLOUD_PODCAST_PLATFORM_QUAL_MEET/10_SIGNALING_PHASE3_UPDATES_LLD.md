@@ -32,14 +32,24 @@ socket.on("chat_message", async (data) => {
 
   if (!roomId) return;
 
+  // 🛡️ SECURITY: Room Membership Validation (Prevent Spoofing/Stale state)
+  const isMember = await redisClient.sismember(`room:${roomId}:users`, user.userId);
+  if (!isMember) return;
+
   // 🛡️ SECURITY: Size Limit
   if (data.content.length > 1000) return;
 
-  // 🛡️ SECURITY: Rate Limiting (SPAM Protection)
-  const rateKey = `chat:rate:${user.userId}`;
-  const count = await redisClient.incr(rateKey);
-  if (count === 1) await redisClient.expire(rateKey, 5);
-  if (count > 10) return; // Block spammer
+  // 🛡️ SECURITY: Rate Limiting (SPAM Protection - Per User AND Per Room)
+  const userRateKey = `chat:rate:user:${user.userId}`;
+  const roomRateKey = `chat:rate:room:${roomId}`;
+
+  const userCount = await redisClient.incr(userRateKey);
+  const roomCount = await redisClient.incr(roomRateKey);
+
+  if (userCount === 1) await redisClient.expire(userRateKey, 5);
+  if (roomCount === 1) await redisClient.expire(roomRateKey, 5);
+
+  if (userCount > 10 || roomCount > 50) return; // Block spammer/overloaded room
 
   // 🛡️ SECURITY: XSS Sanitization (NEVER trust frontend)
   const cleanContent = sanitizeHtml(data.content);
@@ -55,13 +65,14 @@ socket.on("chat_message", async (data) => {
   };
 
   // 🔥 1. BROADCAST FIRST (REAL-TIME)
-  await redisPub.publish(
+  // PERFORMANCE FIX: DO NOT AWAIT PUBLISH
+  redisPub.publish(
     `channel:room:${roomId}`,
     JSON.stringify({
       type: "CHAT_MESSAGE",
       payload: message
     })
-  );
+  ).catch(console.error);
 
   // 🔥 2. PERSIST ASYNC (NON-BLOCKING)
   // Use a simple queue or setImmediate to avoid blocking the hot path event loop
@@ -87,6 +98,10 @@ if (event.type === "CHAT_MESSAGE") {
 
 The Signaling Service will connect to the existing PostgreSQL database to write chat history.
 
+**Database Connection Pool (Critical):**
+Because the signaling service is high-throughput, the PostgreSQL connection pool MUST be explicitly constrained to prevent starving real-time operations.
+*   `max: 10` (Maximum 10 concurrent connections to DB per signaling node).
+
 **Table: `messages`**
 | Column       | Type      |
 | :---         | :---      |
@@ -109,13 +124,4 @@ To allow late-joiners to retrieve chat history, the signaling service (or a smal
 ## 5. Rules (VERY IMPORTANT)
 *   ✅ **Broadcast first:** Real-time delivery is the highest priority.
 *   ❌ **NEVER block event loop:** Do not await the DB write before broadcasting. Use `setImmediate` or a worker queue to prevent DB latency from affecting WebRTC signaling.
-
----
-
-## 6. Failure Handling
-
-| Issue | Behavior |
-| :--- | :--- |
-| **DB down** | Message is still delivered in real-time (history lost). System doesn't crash due to async/catch block. |
-| **Redis down** | Chat disabled (fail safe). System degrades safely. |
-| **Duplicate message** | Ignored by clients using the unique `id`. |
+*   ❌ **NEVER await Redis Publish:** Fire and forget the Redis broadcast to keep the WebRTC message loop fast.

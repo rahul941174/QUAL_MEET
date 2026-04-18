@@ -17,6 +17,7 @@ This hook manages the `MediaRecorder` instance, chunk slicing, and sequential up
 4.  Manage an explicit sequential upload queue to prevent parallel request chaos.
 5.  Handle upload chunk timeouts.
 6.  Handle browser closures (`beforeunload`).
+7.  Display clear Error State UI.
 
 ### 2.2. Recording Flow
 
@@ -71,6 +72,8 @@ async function processQueue() {
     await api.confirmChunkComplete(sessionId, index);
   } catch (error) {
     console.error(`Chunk ${index} failed:`, error);
+    // UI: Show "Recording failed / network error"
+    showErrorStateUI("Upload failed. Retrying...");
     // Depending on policy, requeue or abort session
   } finally {
     isUploading = false;
@@ -81,11 +84,22 @@ async function processQueue() {
 recorder.start(2000);
 ```
 
-**3. Stop Recording:**
+**3. Stop Recording (Queue Flush Safety):**
 ```typescript
 recorder.stop();
-// Wait for `uploadQueue` to empty and `isUploading` to be false
-await api.completeRecording(sessionId);
+
+// 🛡️ RELIABILITY: Final Queue Flush Safety
+// Wait until the queue is completely empty and no active upload is running
+while (uploadQueue.length > 0 || isUploading) {
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+
+try {
+  await api.completeRecording(sessionId);
+} catch (error) {
+  // 🛡️ RELIABILITY: Error State UI for missing chunks or merge failures
+  showErrorStateUI("Recording completion failed. Please try again.");
+}
 ```
 
 ---

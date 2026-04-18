@@ -1,7 +1,7 @@
 # API Gateway Phase 3 Updates LLD (Final)
 
 ## 1. Goal
-Expose the new Media Recording Service and the internal Chat History endpoints securely to the frontend via the API Gateway, ensuring strict security boundaries and payload limits.
+Expose the new Media Recording Service and the internal Chat History endpoints securely to the frontend via the API Gateway, ensuring strict security boundaries, payload limits, and system-level protections.
 
 ---
 
@@ -15,6 +15,7 @@ The API Gateway (`app.ts` / `routes.ts`) needs to be updated with new proxy midd
 *   **Auth Required:** YES. The JWT verification middleware must execute before proxying.
 *   **Path Rewrite:** Strip `/api` so the service receives `/media/*`.
 *   **Rate Limiting:** Apply standard authenticated user rate limits.
+*   **Proxy Timeout:** `proxyTimeout: 10000` (10 seconds). Recording APIs (like URL generation) may hang if S3 is slow; prevent dangling connections.
 *   **🛡️ SECURITY - Payload Limits:** Explicitly limit JSON payload sizes (e.g., `express.json({ limit: '1mb' })`) on these routes to prevent abuse, even though media isn't uploaded here.
 
 ### 2.2. Chat History Routes
@@ -37,7 +38,16 @@ The API Gateway is the public boundary. It **MUST NOT** expose internal communic
 
 ---
 
-## 4. Auth Middleware Consistency
+## 4. System Level Global Limits (Gateway Enforcement)
+
+To prevent total system exhaustion, the Gateway (and related services) must enforce global ceilings:
+*   **Max Concurrent Users:** Hard limit (e.g., 5000) enforced via Redis counters at the Gateway load balancer level.
+*   **Max Rooms Per User:** Limit active rooms (e.g., 5 per user) checked via Room Service during room creation.
+*   **Max Recording Sessions:** Global limit across the cluster (e.g., 100 concurrent FFmpeg merge sessions) to prevent compute meltdown. If reached, the Media Recording Service returns a `503 Service Unavailable` on initialization.
+
+---
+
+## 5. Auth Middleware Consistency
 
 No changes are required to the Auth Middleware itself. It should continue to:
 1. Read the `access_token` from `req.cookies`.
