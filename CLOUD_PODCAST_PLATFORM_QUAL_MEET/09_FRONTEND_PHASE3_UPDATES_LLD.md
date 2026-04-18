@@ -15,7 +15,7 @@ This hook manages the `MediaRecorder` instance, chunk slicing, and upload coordi
 2.  Capture local media stream chunks (1-2 second intervals).
 3.  Request pre-signed URLs.
 4.  Upload chunks directly to S3/R2.
-5.  Handle upload retries.
+5.  Handle upload retries sequentially.
 
 ### 2.2. Recording Flow
 
@@ -36,8 +36,8 @@ recorder.ondataavailable = async (event) => {
     // 1. Get pre-signed URL from backend
     const { uploadUrl } = await api.getUploadUrl(sessionId, currentIndex);
 
-    // 2. Upload directly to S3/R2 with retry logic
-    await uploadChunkWithRetry(uploadUrl, chunk, 3);
+    // 2. Upload directly to S3/R2 with sequential retry logic
+    await uploadChunkWithRetry(uploadUrl, chunk);
   }
 };
 
@@ -53,8 +53,8 @@ await api.completeRecording(sessionId);
 ```
 
 ### 2.3. Upload Reliability (Critical)
-*   **Sequential Queue:** While chunks are generated every 2 seconds, network latency might cause uploads to overlap. The hook should ideally use a queue to ensure we don't saturate the client's uplink with 10 parallel PUT requests.
-*   **Retry Logic:** If a PUT request to the `uploadUrl` fails, retry up to 3 times with exponential backoff before marking the recording session as degraded.
+*   **Sequential Queue:** To avoid 10 parallel PUT requests causing network congestion, the hook must use a queue. Chunks should be uploaded sequentially or with a strict concurrency limit (e.g., 2).
+*   **Retry Logic:** If a PUT request to the `uploadUrl` fails, retry up to 3 times before marking the chunk as failed.
 
 ---
 

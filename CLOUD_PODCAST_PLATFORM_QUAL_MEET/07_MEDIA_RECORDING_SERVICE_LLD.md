@@ -11,7 +11,6 @@ The **Media Recording Service** handles the distributed recording pipeline for Q
 
 ### Non-Responsibilities
 *   **Media Proxying:** The backend MUST NOT receive or proxy video chunks directly from the frontend.
-*   **Grid Composition:** The service only produces per-user video streams (and optionally 2-user side-by-side). Full grid composition is out of scope for Phase 3.
 *   **Cloudinary:** Cloudinary is explicitly forbidden due to reliability issues with chunking.
 
 ---
@@ -52,8 +51,6 @@ recordings/
 | `recording_id` | UUID (FK) | Reference to the `recordings` table  |
 | `chunk_index`  | INTEGER   | Sequential order of the chunk (Crucial) |
 | `uploaded`     | BOOLEAN   | True if upload is confirmed          |
-
-*Note: This schema ensures we can identify missing chunks before attempting to merge.*
 
 ---
 
@@ -151,4 +148,3 @@ When `complete` is called, the service executes the following workflow:
 *   **Out-of-Order Uploads:** Handled implicitly because the merge pipeline sorts files by `chunk_index` before concatenation.
 *   **Duplicate Chunks:** S3/R2 PUT operations are idempotent. A duplicate upload simply overwrites the existing chunk.
 *   **Merge Failure:** If FFmpeg fails, set `status = failed`. Retries can be manually triggered or queued.
-*   **Scalability:** The merging process is CPU-intensive. In a production environment, the `complete` endpoint should push a job to a queue (e.g., BullMQ) processed by dedicated worker nodes.
